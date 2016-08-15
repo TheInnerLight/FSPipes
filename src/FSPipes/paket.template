@@ -1,0 +1,25 @@
+type project
+title
+    FSPipes
+owners
+    Phil Curzon
+authors 
+    Phil Curzon
+projectUrl
+    https://github.com/TheInnerLight/FSPipes
+iconUrl
+    https://raw.githubusercontent.com/TheInnerLight/FSPipes/master/docs/files/img/logo.png
+licenseUrl
+    https://github.com/TheInnerLight/FSPipes/blob/master/LICENSE.txt
+requireLicenseAcceptance
+    false
+copyright
+    Copyright 2015
+tags
+    fsharp f# pipes io
+summary
+    F# streaming IO library
+description
+    F# compositional pipes library for streaming IO
+
+
