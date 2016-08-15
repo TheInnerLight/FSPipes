@@ -117,7 +117,6 @@
     </When>
   </Choose>
   <ItemGroup>
-    <None Include="Script.fsx" />
     <None Include="paket.references" />
     <None Include="paket.template" />
     <Content Include="App.config" />
@@ -125,6 +124,8 @@
     <Compile Include="Pipes.fs" />
     <Compile Include="Consumer.fs" />
     <Compile Include="Producer.fs" />
+    <None Include="Scripts\load-references-debug.fsx" />
+    <None Include="Scripts\load-project-debug.fsx" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="FSharp.Core, Version=4.4.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">

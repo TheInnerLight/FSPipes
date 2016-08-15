@@ -51,3 +51,42 @@ module Pipes =
 
         let (>->) p1 p2 = Pipeline.pipe p1 p2
 
+    type PipeBuilder() =
+        member this.Return x = Pipeline.return' x
+        member this.ReturnFrom x : Pipeline<_,_,_,_,_> = x
+        member this.Bind (x, f) = Pipeline.bind x f
+
+    let pipe = PipeBuilder()
+
+    let chunk chunker p =
+        let rec splitterRec leftover p =
+            pipe {
+                let! x = lift (next p)
+                match x with
+                |Choice1Of2 r -> return r
+                |Choice2Of2 (a, p') ->
+                    let a = 
+                        match leftover with
+                        |Some aLeft -> Array.append aLeft a
+                        |None -> a
+                    match chunker a with
+                    |Choice1Of2 v -> 
+                        do! yield' v
+                        do! splitterRec (None) p'
+                    |Choice2Of2 (v1, v2) ->
+                        do! yield' v1
+                        do! splitterRec (Some v2) p'
+            }
+        splitterRec None p
+
+    let decode enc p =
+        let decoder = (Encoding.createDotNetEncoding enc).GetDecoder()
+        let decodeChunker (bytes : byte[]) = 
+            let chars = Array.zeroCreate<char> (Array.length bytes)
+            let bytesUsed, charsUsed, finished = decoder.Convert(bytes, 0, Array.length bytes, chars, 0, Array.length chars, true)
+            match bytesUsed = Array.length bytes with
+            |true -> Choice1Of2 (System.String(Array.take charsUsed chars))
+            |false -> Choice2Of2 (System.String(Array.take charsUsed chars), Array.skip bytesUsed bytes)
+        chunk decodeChunker p
+
+
