@@ -20,12 +20,22 @@ open NovelFS.NovelIO
 
 module Producer =
     let fromFile path =
-        use stream = new System.IO.FileStream (path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read)
-        let rec loop (stream : System.IO.FileStream) =
-            let bytes = Array.zeroCreate<byte> 1024
-            let read = stream.Read(bytes, 0, 1024)
-            Pipes.yield' bytes
-        loop stream
+        //use stream = new System.IO.FileStream (path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read)
+        Pipes.pipe  {
+            let! channel = Pipes.lift <| File.openBinaryChannel FileMode.Open FileAccess.Read (Filename.CreateFromString path)
+            let rec loop() =
+                Pipes.pipe {
+                    let! neof = Pipes.lift <| BinaryChannel.isReady channel
+                    match neof with
+                    |true ->
+                        let! read = Pipes.lift <| BinaryChannel.readBytes channel 1024
+                        do! Pipes.yield' read
+                        do! loop()
+                    |false -> return ()
+                }
+            return! loop()
+            }
+        
 
     let fromSeq seq = Pipes.each seq
 

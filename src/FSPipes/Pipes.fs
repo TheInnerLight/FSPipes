@@ -58,28 +58,25 @@ module Pipes =
 
     let pipe = PipeBuilder()
 
-    let chunk chunker p =
-        let rec splitterRec leftover p =
+    let chunk chunker =
+        let rec splitterRec leftover =
             pipe {
-                let! x = lift (next p)
-                match x with
-                |Choice1Of2 r -> return r
-                |Choice2Of2 (a, p') ->
-                    let a = 
-                        match leftover with
-                        |Some aLeft -> Array.append aLeft a
-                        |None -> a
-                    match chunker a with
-                    |Choice1Of2 v -> 
-                        do! yield' v
-                        do! splitterRec (None) p'
-                    |Choice2Of2 (v1, v2) ->
-                        do! yield' v1
-                        do! splitterRec (Some v2) p'
+                let! x = Pipeline.request()
+                let x' = 
+                    match leftover with
+                    |Some aLeft -> Array.append aLeft x
+                    |None -> x
+                match chunker x' with
+                |Choice1Of2 v -> 
+                    do! Pipeline.respond v
+                    return! splitterRec (None)
+                |Choice2Of2 (v1, v2) ->
+                    do! Pipeline.respond v1
+                    return! splitterRec (Some v2)
             }
-        splitterRec None p
+        splitterRec None
 
-    let decode enc p =
+    let decode enc =
         let decoder = (Encoding.createDotNetEncoding enc).GetDecoder()
         let decodeChunker (bytes : byte[]) = 
             let chars = Array.zeroCreate<char> (Array.length bytes)
@@ -87,6 +84,6 @@ module Pipes =
             match bytesUsed = Array.length bytes with
             |true -> Choice1Of2 (System.String(Array.take charsUsed chars))
             |false -> Choice2Of2 (System.String(Array.take charsUsed chars), Array.skip bytesUsed bytes)
-        chunk decodeChunker p
+        chunk decodeChunker
 
 
