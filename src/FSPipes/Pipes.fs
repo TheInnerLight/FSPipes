@@ -18,6 +18,11 @@ namespace NovelFS.FSPipes
 
 open NovelFS.NovelIO
 
+type PipeBuilder() =
+    member this.Return x = Pipeline.return' x
+    member this.ReturnFrom x : Pipeline<_,_,_,_,_> = x
+    member this.Bind (x, f) = Pipeline.bind x f
+
 module Pipes =
     let rec lift x = IOM <| IO.bind x (fun r -> IO.return' (Value r))
 
@@ -51,12 +56,18 @@ module Pipes =
 
         let (>->) p1 p2 = Pipeline.pipe p1 p2
 
-    type PipeBuilder() =
-        member this.Return x = Pipeline.return' x
-        member this.ReturnFrom x : Pipeline<_,_,_,_,_> = x
-        member this.Bind (x, f) = Pipeline.bind x f
-
     let pipe = PipeBuilder()
+
+    let cat<'a> : Pipeline<unit, 'a, unit, 'a, unit> = 
+        Pipeline.forever <| 
+            pipe { 
+                let! x = Pipeline.request()
+                do! Pipeline.respond x
+            }
+
+    let map f = for' cat (Pipeline.respond << f)
+
+    let filter p = for' cat (fun a -> if (p a) then Pipeline.respond a else Pipeline.return' ())
 
     let chunk chunker =
         let rec splitterRec leftover =
