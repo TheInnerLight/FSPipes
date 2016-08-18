@@ -98,6 +98,8 @@ module Pipeline =
 
     let map f x = bind x (return' << f)
 
+    let apply f x = bind f (fun fe -> map fe x)
+
     let pipe p1 p2 = bindPull p2 (fun () -> p1)
 
     /// Yields the result of applying f until p holds.

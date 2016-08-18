@@ -19,16 +19,17 @@ namespace NovelFS.FSPipes
 open NovelFS.NovelIO
 
 module Producer =
-    let fromFile path =
-        //use stream = new System.IO.FileStream (path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read)
+    /// Create a producer from a supplied file which supplies the bytes that make up the file as a series of byte arrays
+    let fromFile path : Producer<_,_> =
         Pipes.pipe  {
-            let! channel = Pipes.lift <| File.openBinaryChannel FileMode.Open FileAccess.Read (Filename.CreateFromString path)
+            let! channel = Pipes.liftIO <| File.openBinaryChannel FileMode.Open FileAccess.Read (Filename.CreateFromString path)
+            // loop over the channel, producing more data until the source is exhausted
             let rec loop() =
                 Pipes.pipe {
-                    let! neof = Pipes.lift <| BinaryChannel.isReady channel
+                    let! neof = Pipes.liftIO <| BinaryChannel.isReady channel
                     match neof with
                     |true ->
-                        let! read = Pipes.lift <| BinaryChannel.readBytes channel 1024
+                        let! read = Pipes.liftIO <| BinaryChannel.readBytes channel 1024
                         do! Pipes.yield' read
                         do! loop()
                     |false -> return ()
@@ -36,11 +37,12 @@ module Producer =
             return! loop()
             }
         
-
+    /// Create a producer which delivers the data from a supplied sequence
     let fromSeq seq = Pipes.each seq
 
-    let stdInLine =
+    /// A producer which delivers data from the processes' stdin stream
+    let stdInLine : Producer<_, _> =
         Pipeline.forever (
-            let pl' = Pipes.lift (Console.readLine)
+            let pl' = Pipes.liftIO (Console.readLine)
             Pipeline.bind pl' (Pipes.yield'))
         

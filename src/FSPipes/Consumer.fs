@@ -17,8 +17,9 @@
 namespace NovelFS.NovelIO
 
 open NovelFS.FSPipes
+open Pipes.Operators
 
 module Consumer =
-    let stdOutLine =
-        Pipeline.forever (Pipeline.bind Pipes.await (Pipes.lift << Console.writeLine))
+    /// A consumer that writes out data to the processes' stdout stream
+    let stdOutLine : Consumer<_,_> = Pipeline.forever (Pipes.await >>= (Pipes.liftIO << Console.writeLine))
 
