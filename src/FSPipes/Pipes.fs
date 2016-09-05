@@ -115,7 +115,7 @@ module Pipes =
         // split the input bytes into a choice of either completely converted into a string or converted partially with some bytes unconsumed
         let decodeChunker (bytes : byte[]) = 
             let chars = Array.zeroCreate<char> (Array.length bytes)
-            let bytesUsed, charsUsed, finished = decoder.Convert(bytes, 0, Array.length bytes, chars, 0, Array.length chars, true)
+            let bytesUsed, charsUsed, _ = decoder.Convert(bytes, 0, Array.length bytes, chars, 0, Array.length chars, true)
             match bytesUsed = Array.length bytes with
             |true -> Choice1Of2 (System.String(Array.take charsUsed chars))
             |false -> Choice2Of2 (System.String(Array.take charsUsed chars), Array.skip bytesUsed bytes)

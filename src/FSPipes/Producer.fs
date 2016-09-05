@@ -22,14 +22,14 @@ module Producer =
     /// Create a producer from a supplied file which supplies the bytes that make up the file as a series of byte arrays
     let fromFile path : Producer<_,_> =
         Pipes.pipe  {
-            let! channel = Pipes.liftIO <| File.openBinaryChannel FileMode.Open FileAccess.Read (Filename.CreateFromString path)
+            let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultRead (File.Path.fromValid path)
             // loop over the channel, producing more data until the source is exhausted
             let rec loop() =
                 Pipes.pipe {
-                    let! neof = Pipes.liftIO <| BinaryChannel.isReady channel
+                    let! neof = Pipes.liftIO <| BinaryChannel.isEOF channel
                     match neof with
                     |true ->
-                        let! read = Pipes.liftIO <| BinaryChannel.readBytes channel 1024
+                        let! read = Pipes.liftIO <| BinaryChannel.read channel 1024
                         do! Pipes.yield' read
                         do! loop()
                     |false -> return ()
