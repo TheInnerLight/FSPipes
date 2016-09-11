@@ -94,13 +94,46 @@ module Pipeline =
         |IOM io -> IOM <| IO.bind io (fun p' -> IO.return' <| bindPull p' fb')
         |Value r   -> Value r
 
+    // Builder
+
+    type PipeBuilder() =
+        member this.Return x = return' x
+        member this.ReturnFrom x : Pipeline<_,_,_,_,_> = x
+        member this.Bind (x, f) = bind x f
+
+    let pipe = PipeBuilder()
+
     // ----- OTHER------------
 
     let map f x = bind x (return' << f)
 
     let apply f x = bind f (fun fe -> map fe x)
 
-    let pipe p1 p2 = bindPull p2 (fun () -> p1)
+    let join x = bind x id
+
+    let mapM mFunc sequ =
+        let consF x ys = apply (map (listCons) (mFunc x)) ys
+        Seq.foldBack (consF) sequ (return' [])
+        |> map (Seq.ofList)
+
+    let iterM mFunc sequ =
+        mapM (mFunc) sequ
+        |> map (ignore)
+
+    let pipeTo p1 p2 = bindPull p2 (fun () -> p1)
+
+    /// Execute an action repeatedly as long as the given boolean IO action returns true
+    let iterWhileM (pAct : Pipeline<_,_,_,_,bool>) (act : Pipeline<_,_,_,_,'V>) =
+        let rec whileMRec() =
+            pipe { // check the predicate action
+                let! p = pAct 
+                match p with
+                |true -> // unwrap the current action value then recurse
+                    let! _ = act
+                    return! whileMRec()
+                |false -> return () // finished
+            }
+        whileMRec ()
 
     /// Yields the result of applying f until p holds.
     let rec iterateUntilM p f v =
@@ -116,3 +149,8 @@ module Pipeline =
 
     /// Calls the supplied pipeline forever
     let forever x = iterateWhile (const' true) x
+
+/// Module to provide the definition of the io computation expression
+[<AutoOpen>]
+module PipeBuilders =
+    let pipe = Pipeline.PipeBuilder()

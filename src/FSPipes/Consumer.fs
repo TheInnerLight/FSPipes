@@ -21,5 +21,33 @@ open Pipes.Operators
 
 module Consumer =
     /// A consumer that writes out data to the processes' stdout stream
-    let stdOutLine : Consumer<_,_> = Pipeline.forever (Pipes.await >>= (Pipes.liftIO << Console.writeLine))
+    let stdOutLine : Consumer<_,_> = Pipes.for' Pipes.identity (Pipes.liftIO << Console.writeLine)
+
+    /// Creates a consumer from a supplied binary channel
+    let fromChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << BinaryChannel.writeBytes chan)
+
+    let fromTChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << TextChannel.putStrLn chan)
+
+    /// Creates a consumer that writes data out to a supplied file
+    let writeToFile file : Consumer<_,_> =
+        File.withBinaryChannel File.Open.defaultWrite file (IO.return' << fromChannel)
+        |> Pipes.liftIO
+        |> Pipeline.join
+
+    let writeLinesToFile file : Consumer<_,_> =
+        let channel = File.openTextChannel File.Open.defaultWrite file
+        let x = 
+            IO.map (fromTChannel) channel
+            |> Pipes.liftIO
+            |> Pipeline.join
+        let close = Pipes.liftIO <| IO.bind channel (TextChannel.close)
+        pipe {
+            do! x
+            do! close
+            return! x
+        }
+        
+         
+
+
 

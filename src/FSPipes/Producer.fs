@@ -17,24 +17,16 @@
 namespace NovelFS.FSPipes
 
 open NovelFS.NovelIO
+open Pipes.Operators
 
 module Producer =
     /// Create a producer from a supplied file which supplies the bytes that make up the file as a series of byte arrays
     let fromFile path : Producer<_,_> =
-        Pipes.pipe  {
+        pipe  {
             let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultRead (File.Path.fromValid path)
-            // loop over the channel, producing more data until the source is exhausted
-            let rec loop() =
-                Pipes.pipe {
-                    let! neof = Pipes.liftIO <| BinaryChannel.isEOF channel
-                    match neof with
-                    |true ->
-                        let! read = Pipes.liftIO <| BinaryChannel.read channel 1024
-                        do! Pipes.yield' read
-                        do! loop()
-                    |false -> return ()
-                }
-            return! loop()
+            let eof = Pipes.liftIO <| BinaryChannel.isEOF channel
+            let read = Pipes.liftIO <| BinaryChannel.read channel 1024
+            return! Pipeline.iterWhileM eof read
             }
         
     /// Create a producer which delivers the data from a supplied sequence
@@ -44,5 +36,5 @@ module Producer =
     let stdInLine : Producer<_, _> =
         Pipeline.forever (
             let pl' = Pipes.liftIO (Console.readLine)
-            Pipeline.bind pl' (Pipes.yield'))
+            pl' >>= Pipes.yield')
         
