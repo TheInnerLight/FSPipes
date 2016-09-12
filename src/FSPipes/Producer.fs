@@ -24,8 +24,8 @@ module Producer =
     let fromFile path : Producer<_,_> =
         pipe  {
             let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultRead (File.Path.fromValid path)
-            let eof = Pipes.liftIO <| BinaryChannel.isEOF channel
-            let read = Pipes.liftIO <| BinaryChannel.read channel 1024
+            let eof = (Pipes.liftIO <| BinaryChannel.isEOF channel) |> Pipeline.map (not)
+            let read = (Pipes.liftIO <| BinaryChannel.read channel 16384) >>= (Pipes.yield')
             return! Pipeline.iterWhileM eof read
             }
         

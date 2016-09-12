@@ -65,8 +65,8 @@
     <Content Include="App.config" />
     <Compile Include="PipeInternal.fs" />
     <Compile Include="Pipes.fs" />
-    <Compile Include="Consumer.fs" />
     <Compile Include="Producer.fs" />
+    <Compile Include="Consumer.fs" />
     <None Include="Scripts\load-references-debug.fsx" />
     <None Include="Scripts\load-project-debug.fsx" />
     <None Include="Scripts\load-references-release.fsx" />

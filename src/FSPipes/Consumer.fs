@@ -24,27 +24,25 @@ module Consumer =
     let stdOutLine : Consumer<_,_> = Pipes.for' Pipes.identity (Pipes.liftIO << Console.writeLine)
 
     /// Creates a consumer from a supplied binary channel
-    let fromChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << BinaryChannel.writeBytes chan)
+    let fromBinaryChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << BinaryChannel.writeBytes chan)
 
-    let fromTChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << TextChannel.putStrLn chan)
+    /// Creates a consumer from a supplied text channel
+    let fromTextChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << TextChannel.putStrLn chan)
 
     /// Creates a consumer that writes data out to a supplied file
     let writeToFile file : Consumer<_,_> =
-        File.withBinaryChannel File.Open.defaultWrite file (IO.return' << fromChannel)
-        |> Pipes.liftIO
-        |> Pipeline.join
-
-    let writeLinesToFile file : Consumer<_,_> =
-        let channel = File.openTextChannel File.Open.defaultWrite file
-        let x = 
-            IO.map (fromTChannel) channel
-            |> Pipes.liftIO
-            |> Pipeline.join
-        let close = Pipes.liftIO <| IO.bind channel (TextChannel.close)
         pipe {
-            do! x
-            do! close
-            return! x
+            let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultWrite file
+            do! fromBinaryChannel channel
+            do! Pipes.liftIO <| BinaryChannel.close channel
+        }
+
+    /// Creates a consumer that writes data out to a supplied file line by line
+    let writeLinesToFile file : Consumer<_,_> =
+        pipe {
+            let! channel = Pipes.liftIO <| File.openTextChannel File.Open.defaultWrite file
+            do! fromTextChannel channel
+            do! Pipes.liftIO <| TextChannel.close channel
         }
         
          

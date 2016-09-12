@@ -148,7 +148,7 @@ module Pipeline =
     let iterateWhile p x = iterateUntil (not << p) x
 
     /// Calls the supplied pipeline forever
-    let forever x = iterateWhile (const' true) x
+    let forever x = iterWhileM (return' true) x
 
 /// Module to provide the definition of the io computation expression
 [<AutoOpen>]

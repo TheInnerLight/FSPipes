@@ -3,5 +3,5 @@
 #load "load-references-release.fsx"
 #load "../PipeInternal.fs"
       "../Pipes.fs"
-      "../Consumer.fs"
       "../Producer.fs"
+      "../Consumer.fs"
