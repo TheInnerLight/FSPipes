@@ -80,6 +80,17 @@ module Pipes =
                 do! yield' x
             }
 
+    /// Folds over a producer using a supplied accumulation function, initial accumulator value and producer.
+    /// (Note: this function is not an idiomatic use of Pipes but it is included to permit the development of unit tests.)
+    let fold f acc (p0 : Producer<_, _>) =
+        let rec foldRec p x =
+            match p with
+            |Request (_)  -> invalidOp "Impossible"
+            |Respond (a, fu) -> foldRec (fu ()) (f x a)
+            |IOM m  -> IOM <| IO.bind m (fun p' -> IO.return' <| foldRec p' x)
+            |Value _ -> Pipeline.return' x
+        foldRec p0 acc
+
     /// Creates a pipe that applies a function to every value flowing downstream
     let map f = for' identity (yield' << f)
 
