@@ -18,7 +18,9 @@ namespace NovelFS.FSPipes
 
 open NovelFS.NovelIO
 
-
+type GroupedData<'T, 'Id> = 
+    | Data of 'T 
+    | Marker of 'Id
 
 module Pipes =
     /// Lift a value from the IO monad into the pipeline monad
@@ -77,7 +79,7 @@ module Pipes =
         Pipeline.forever <| 
             pipe { 
                 let! x = await
-                do! yield' x
+                return! yield' x
             }
 
     /// Folds over a producer using a supplied accumulation function, initial accumulator value and producer.
@@ -87,8 +89,8 @@ module Pipes =
             match p with
             |Request (_)  -> invalidOp "Impossible"
             |Respond (a, fu) -> foldRec (fu ()) (f x a)
-            |IOM m  -> IOM <| IO.bind m (fun p' -> IO.return' <| foldRec p' x)
-            |Value _ -> Pipeline.return' x
+            |IOM m  -> IO.bind m (fun p' -> foldRec p' x)
+            |Value _ -> IO.return' x
         foldRec p0 acc
 
     /// Creates a pipe that applies a function to every value flowing downstream
@@ -103,7 +105,7 @@ module Pipes =
             pipe {
                 do! yield' acc
                 let! x = await
-                do! scanRec (f acc x)
+                return! scanRec (f acc x)
             }
         scanRec acc
 
@@ -146,6 +148,8 @@ module Pipes =
         let getBytes (str: string) = encoder.GetBytes(str)
         for' identity (yield' << getBytes)
 
+    /// Creates a pipe that applies a sequence producing function to every value flowing downstream, each value
+    /// in the resulting sequence is yielded individually.
     let collect f =
         let rec collectRec() =
             pipe {
@@ -165,11 +169,52 @@ module Pipes =
             }
         Pipeline.forever <| collectRec()            
 
+    /// Creates a pipe that forwards string values downstream line by line
     let lines = collect (fun (str : string) -> str.Split('\n'))
 
+    /// Creates a pipe that forwards string values downstream word by word
     let words = 
         collect (fun (str : string) -> 
             str.Split(' ') 
             |> Seq.map (fun str -> str.Trim()))
 
+    /// Creates a pipe that takes values while a condition is satisfied
+    let takeWhile pred = 
+        let rec takeWhileRec() =
+             pipe {
+                let! x = await
+                match pred x with
+                |false -> return ()
+                |true ->
+                    do! yield' x
+                    return! takeWhileRec()
+             }
+        takeWhileRec()
 
+    module String =
+        module private Internal =
+            type Buffer = {Buff : string; Len : int}
+
+            let push (str : string) buffer =
+                let str' = buffer.Buff + str
+                let start' = max (str'.Length - buffer.Len) 0
+                let end' = min (str'.Length) (buffer.Len + start')
+                {Buff = str'.Substring(start', end'-start'); Len = buffer.Len} 
+
+        let markAfter (sought : string) =
+            let length = (sought.Length)
+            let rec untilRec (buff : Internal.Buffer) =
+                pipe {
+                    let! (str : string) = await
+                    let combined = buff.Buff + str
+                    match combined.Contains(sought) with
+                    |false -> 
+                        do! yield' (Data str)
+                        return! untilRec (Internal.push str buff)
+                    |true -> 
+                        do! yield' << Data <| combined.Substring(buff.Buff.Length, combined.IndexOf(sought) + length)
+                        do! yield' <| Marker()
+                        do! yield' << Data <| combined.Substring(combined.IndexOf(sought) + length + 1)
+                        return! for' identity (yield' << Data)
+                    }
+            untilRec {Buff = System.String.Empty; Len = sought.Length}

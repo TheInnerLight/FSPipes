@@ -77,6 +77,7 @@
     <Reference Include="NovelIO">
       <HintPath>..\packages\NovelIO\lib\net45\NovelIO.dll</HintPath>
     </Reference>
+    <Reference Include="NovelIO" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Numerics" />

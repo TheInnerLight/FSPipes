@@ -26,7 +26,6 @@ type ``Pipes Unit Tests``() =
         let mapped = Pipes.each values >-> Pipes.map ((+) 1)
         let list = 
             Pipes.fold (fun acc v ->acc @ [v]) [] mapped
-            |> Pipes.runEffect 
             |> IO.run
         list = List.map ((+) 1) values
 
@@ -35,7 +34,6 @@ type ``Pipes Unit Tests``() =
         let mapped = Pipes.each values >-> Pipes.filter (fun x -> x > 5)
         let list = 
             Pipes.fold (fun acc v ->acc @ [v]) [] mapped
-            |> Pipes.runEffect 
             |> IO.run
         list = List.filter (fun x -> x > 5) values
 
