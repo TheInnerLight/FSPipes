@@ -201,7 +201,7 @@ module Pipes =
                 let end' = min (str'.Length) (buffer.Len + start')
                 {Buff = str'.Substring(start', end'-start'); Len = buffer.Len} 
 
-        let markAfter (sought : string) =
+        let groupAfter (sought : string) =
             let length = (sought.Length)
             let rec untilRec (buff : Internal.Buffer) =
                 pipe {
