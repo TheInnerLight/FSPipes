@@ -21,7 +21,7 @@ open Pipes.Operators
 
 module Consumer =
     /// A consumer that writes out data to the processes' stdout stream
-    let stdOutLine : Consumer<_,_> = Pipes.for' Pipes.identity (Pipes.liftIO << Console.writeLine)
+    let stdOutLine : Consumer<_, unit> = Pipes.for' Pipes.identity (Pipes.liftIO << Console.writeLine)
 
     /// Creates a consumer from a supplied binary channel
     let fromBinaryChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << BinaryChannel.writeBytes chan)

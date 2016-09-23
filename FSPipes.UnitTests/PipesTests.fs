@@ -52,6 +52,12 @@ type ``Pipes Unit Tests``() =
         list = List.takeWhile (fun x -> x > 5) values
 
     [<Property>]
+    static member ``skipWhile on pure sequence skips elements while predicate is satisfied`` (values : int list) =
+        let took = Pipes.each values >-> Pipes.skipWhile (fun x -> x > 5)
+        let list = PipeTestHelper.toList took
+        list = List.skipWhile (fun x -> x > 5) values
+
+    [<Property>]
     static member ``scan (+) on pure string sequence concatenates strings`` (values : NonEmptyString list) =
         let values = values |> List.map (fun x -> x.Get)
         let took = Pipes.each values >-> Pipes.scan (+) System.String.Empty

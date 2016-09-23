@@ -30,13 +30,13 @@ module Pipes =
     let await<'ain, 'bin, 'bout> : Pipeline<unit, 'ain, 'bin, 'bout, 'ain> = Pipeline.request() 
 
     /// Yield a supplied value to the pipeline
-    let yield' v : Pipeline<'aout, 'ain, 'bin, 'bout, 'bin> = Pipeline.respond v
+    let yield' v : Pipeline<'aout, 'ain, unit, 'bout, unit> = Pipeline.respond v
 
     /// Loops over a supplied pipeline replacing each yield using the supplied pipeline generation function
     let for' p f = Pipeline.bindResponse p f
 
     /// Creates a Producer of 'a from a sequence of 'a
-    let each sequ : Producer<'a, unit> =
+    let each sequ  =
         Seq.fold (fun acc p -> Pipeline.bind acc (fun _ -> yield' p)) (Pipeline.return'()) sequ
 
     /// Advances the producer getting a choice of either the final value or a value and the producer to generate the subsequent value
@@ -66,21 +66,25 @@ module Pipes =
         /// Apply operator on pipelines
         let inline (<*>) f x = Pipeline.apply f x
         /// Sequence two pipelines, discarding the first argument
-        let inline ( *> ) x1 x2 = x1 >>= fun _ -> x2
-        /// Sequence two pipelines, discarding the second argument
-        let inline ( <* ) x1 x2 = x2 *> x1
+        let inline ( >>. ) u v = Pipeline.return' (const' id) <*> u <*> v
+        /// Sequence two pipelines, discarding the value of the second argument.
+        let inline ( .>> ) u v = Pipeline.return' const' <*> u <*> v
         /// Combined two pipelines, piping the output of the first to the input of the second
         let inline (>->) p1 p2 = Pipeline.pipeTo p1 p2
+
+        let inline (+>>) p1 f = Pipeline.bindPull p1 f
+
+        let inline (>+>) p1 p2 = fun x -> Pipeline.bindPull (p1 x) p2
+
+        let inline (>>~) p1 f = Pipeline.bindPush (p1) f
+
+        let inline (>~>) p1 p2 = fun x -> Pipeline.bindPush (p1 x) p2
+
 
     open Operators
 
     /// The identity pipe, it receives input from upstream and forwards it on downstream unchanged
-    let identity<'a> : Pipeline<unit, 'a, unit, 'a, unit> = 
-        Pipeline.forever <| 
-            pipe { 
-                let! x = await
-                return! yield' x
-            }
+    let identity<'a,'V> : Pipeline<unit, 'a, unit, 'a, 'V>  = Pipeline.pull()
 
     /// Folds over a producer using a supplied accumulation function, initial accumulator value and producer.
     /// (Note: this function is not an idiomatic use of Pipes but it is included to permit the development of unit tests.)
@@ -103,9 +107,9 @@ module Pipes =
     let scan f acc =
         let rec scanRec acc = 
             pipe {
-                do! yield' acc
+                do! yield' acc // yield the running total
                 let! x = await
-                return! scanRec (f acc x)
+                return! scanRec (f acc x) // recursive with new accumulator
             }
         scanRec acc
 
@@ -148,48 +152,74 @@ module Pipes =
         let getBytes (str: string) = encoder.GetBytes(str)
         for' identity (yield' << getBytes)
 
+    let encode2 enc arr =
+        let encoder = (Encoding.createDotNetEncoding enc)
+        let decoder = (Encoding.createDotNetEncoding enc).GetDecoder()
+        let rec encode2Rec (leftover : byte[]) =
+            pipe {
+                let! (bytes : byte[]) = Pipeline.request leftover
+                let chars = Array.zeroCreate<char> (Array.length bytes)
+                let bytesUsed, charsUsed, _ = decoder.Convert(bytes, 0, Array.length bytes, chars, 0, Array.length chars, true)
+                match bytesUsed = Array.length bytes with
+                |true -> 
+                    let! (resp : string) = Pipeline.respond <| System.String(Array.take charsUsed chars)
+                    return! encode2Rec (encoder.GetBytes(resp))
+                |false -> 
+                    let! (resp : string) = Pipeline.respond <| System.String(Array.take charsUsed chars)
+                    return! encode2Rec (Array.append (encoder.GetBytes(resp)) (Array.skip bytesUsed bytes))
+            }
+        encode2Rec arr
+
+    let byteBuffer<'V> : Pipeline<_,_,_,_,'V> =
+        let rec byteBufferRec leftover =
+            pipe {
+                let! (bytes : byte[]) = await
+                let! (leftover' : byte[]) = Pipeline.respond (Array.append bytes leftover)
+                return! byteBufferRec leftover'
+            }
+        byteBufferRec Array.empty
+
     /// Creates a pipe that applies a sequence producing function to every value flowing downstream, each value
     /// in the resulting sequence is yielded individually.
-    let collect f =
-        let rec collectRec() =
-            pipe {
-                let! x = await
-                let sequence : #seq<_> = f x
-                let enumerator = sequence.GetEnumerator()
-                let rec yldRec() =
-                    pipe {
-                        match enumerator.MoveNext() with
-                        |true ->
-                            do! yield' enumerator.Current
-                            return! yldRec()
-                        |false ->
-                            return ()
-                    }
-                return! yldRec()
-            }
-        Pipeline.forever <| collectRec()            
+    let collect f = for' identity (fun a -> each (f a))
 
     /// Creates a pipe that forwards string values downstream line by line
-    let lines = collect (fun (str : string) -> str.Split('\n'))
+    let lines<'V> : Pipeline<unit, string, unit, string, 'V> = collect (fun (str : string) -> str.Split('\n'))
 
     /// Creates a pipe that forwards string values downstream word by word
-    let words = 
+    let words<'V> : Pipeline<unit, string, unit, string, 'V>  = 
         collect (fun (str : string) -> 
-            str.Split(' ') 
-            |> Seq.map (fun str -> str.Trim()))
+            str.Split(' ') |> Seq.map (fun str -> str.Trim()))
 
     /// Creates a pipe that takes values while a condition is satisfied
-    let takeWhile pred = 
+    let takeWhile pred =
         let rec takeWhileRec() =
              pipe {
                 let! x = await
                 match pred x with
-                |false -> return ()
-                |true ->
+                |true -> // still taking values
                     do! yield' x
                     return! takeWhileRec()
+                |false -> // finished
+                    return ()
+                
              }
         takeWhileRec()
+
+    /// Creates a pipe that skips values while a condition is satisfied
+    let skipWhile pred = 
+        let rec skipWhileRec() =
+             pipe {
+                let! x = await
+                match pred x with
+                |true -> // still taking values
+                    return! skipWhileRec()
+                |false -> // finished
+                    do! yield' x
+                    return! identity
+                
+             }
+        skipWhileRec()
 
     module String =
         module private Internal =

@@ -20,17 +20,17 @@ open NovelFS.NovelIO
 
 type X = private |Closed
 
-type Pipeline<'aout, 'ain, 'bin, 'bout, 'V> =
-    |Request of 'aout * ('ain -> Pipeline<'aout, 'ain, 'bin, 'bout, 'V>)
-    |Respond of 'bout * ('bin -> Pipeline<'aout, 'ain, 'bin, 'bout, 'V>)
-    |IOM of IO<Pipeline<'aout, 'ain, 'bin, 'bout, 'V>>
+type Pipeline<'UO, 'UI, 'DI, 'DO, 'V> =
+    |Request of 'UO * ('UI -> Pipeline<'UO, 'UI, 'DI, 'DO, 'V>)
+    |Respond of 'DO * ('DI -> Pipeline<'UO, 'UI, 'DI, 'DO, 'V>)
+    |IOM of IO<Pipeline<'UO, 'UI, 'DI, 'DO, 'V>>
     |Value of 'V
 
-type Producer<'Out, 'V> = Pipeline<X, unit, unit, 'Out, 'V>
+type Producer<'DO, 'V> = Pipeline<X, unit, unit, 'DO, 'V>
 
-type Consumer<'InReq, 'V> = Pipeline<unit, 'InReq, unit, X, 'V>
+type Consumer<'UI, 'V> = Pipeline<unit, 'UI, unit, X, 'V>
 
-type Pipe<'In, 'Out, 'V> = Pipeline<unit, 'In, unit, 'Out, 'V>
+type Pipe<'UI, 'DO, 'V> = Pipeline<unit, 'UI, unit, 'DO, 'V>
 
 type Effect<'V> = Pipeline<X, unit, unit, X, 'V>
 
@@ -41,14 +41,14 @@ module Pipeline =
 
     let respond a = Respond (a, Value)
 
-    let request() = Request ((), Value)
+    let request x = Request (x, Value)
 
     let pull = 
         let rec go a' = Request (a', (fun a -> Respond (a, go)))
         go
 
     let push = 
-        let rec go a = Respond (a, fun a' -> Respond(a', go))
+        let rec go a = Respond (a, fun a' -> Request(a', go))
         go
 
     // ------------ CATEGORY COMPOSITION ------------
@@ -58,7 +58,7 @@ module Pipeline =
             match p with
             |Request (a', fa) -> Request (a', bindRec << fa)
             |Respond (b,  fb') -> Respond (b, bindRec << fb')
-            |IOM io -> IOM <| IO.bind io (IO.return' << bindRec)
+            |IOM io -> IOM <| IO.map bindRec io
             |Value r -> f r
         bindRec p0
 
@@ -67,7 +67,7 @@ module Pipeline =
             match p with
             |Request (x', fx)  -> Request (x', bindRec << fx)
             |Respond (b, fb') -> bind (fb b) (bindRec << fb')
-            |IOM io -> IOM <| IO.bind io (IO.return' << bindRec)
+            |IOM io -> IOM <| IO.map bindRec io
             |Value a   -> Value a
         bindRec p0
 
@@ -76,22 +76,22 @@ module Pipeline =
             match p with
             |Request (b', fb)  -> bind (fb' b') (bindRec << fb)
             |Respond (x, fx') -> Respond (x, bindRec << fx')
-            |IOM io -> IOM <| IO.bind io (IO.return' << bindRec)
+            |IOM io -> IOM <| IO.map bindRec io
             |Value r -> Value r
         bindRec p0
 
     let rec bindPush p fb =
         match p with
         |Request (a', fa)  -> Request (a', (fun a -> bindPush (fa a) fb))
-        |Respond (b , fb') ->  bindPull (fb b) fb' 
-        |IOM io -> IOM <| IO.bind io (fun p' -> IO.return' <| bindPush p' fb)
+        |Respond (b , fb') ->  bindPull (fb b) fb'
+        |IOM io -> IOM <| IO.map (fun p' -> bindPush p' fb) io
         |Value r   -> Value r
 
     and bindPull p fb' =
         match p with
         |Request (b', fb)  -> bindPush (fb' b') fb
         |Respond (c,  fc') -> Respond (c, (fun c' -> bindPull (fc' c') fb' ))
-        |IOM io -> IOM <| IO.bind io (fun p' -> IO.return' <| bindPull p' fb')
+        |IOM io -> IOM <| IO.map (fun p' -> bindPull p' fb') io
         |Value r   -> Value r
 
     // Builder
