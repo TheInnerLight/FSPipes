@@ -22,6 +22,10 @@ type GroupedData<'T, 'Id> =
     | Data of 'T 
     | Marker of 'Id
 
+type BufferRequest<'a> =
+    |RequestBack of 'a
+    |PushBack of 'a
+
 module Pipes =
     /// Lift a value from the IO monad into the pipeline monad
     let liftIO x = IOM <| IO.bind x (IO.return' << Value)
@@ -174,14 +178,18 @@ module Pipes =
         let rec byteBufferRec leftover =
             pipe {
                 let! (bytes : byte[]) = await
-                let! (leftover' : byte[]) = Pipeline.respond (Array.append bytes leftover)
-                return! byteBufferRec leftover'
+                let! (leftoverReq : BufferRequest<byte[]>) =
+                    match leftover with
+                    |RequestBack leftover' -> Pipeline.respond (Array.append bytes leftover')
+                    |PushBack leftover' -> 
+                        Pipeline.respond ([||]) >>= (fun _ -> Pipeline.return' <| RequestBack leftover')
+                return! byteBufferRec  leftoverReq
             }
-        byteBufferRec Array.empty
+        byteBufferRec (RequestBack [||])
 
     /// Creates a pipe that applies a sequence producing function to every value flowing downstream, each value
     /// in the resulting sequence is yielded individually.
-    let collect f = for' identity (fun a -> each (f a))
+    let collect f = for' identity (each << f)
 
     /// Creates a pipe that forwards string values downstream line by line
     let lines<'V> : Pipeline<unit, string, unit, string, 'V> = collect (fun (str : string) -> str.Split('\n'))
@@ -220,6 +228,26 @@ module Pipes =
                 
              }
         skipWhileRec()
+
+    module Array =
+        let until sought buff =
+            let rec untilRec buff =
+                pipe {
+                    let! buff = Pipeline.request (RequestBack buff)
+                    let maybeIndex =
+                        buff
+                        |> Array.windowed (Array.length sought)
+                        |> Array.tryFindIndex (fun arr -> arr = sought)
+                    match maybeIndex with
+                    |Some ind -> 
+                        let before, after = Array.splitAt ind buff
+                        do! yield' before
+                        let! _ = Pipeline.request (PushBack after)
+                        return ()
+                    |None ->
+                        return! untilRec buff
+                }
+            untilRec buff
 
     module String =
         module private Internal =

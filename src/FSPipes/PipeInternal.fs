@@ -43,13 +43,10 @@ module Pipeline =
 
     let request x = Request (x, Value)
 
-    let pull = 
-        let rec go a' = Request (a', (fun a -> Respond (a, go)))
-        go
+    let rec pull p' = Request (p', (fun p -> Respond (p, pull)))
 
-    let push = 
-        let rec go a = Respond (a, fun a' -> Request(a', go))
-        go
+    let rec push p = Respond (p, fun p' -> Request(p', push))
+
 
     // ------------ CATEGORY COMPOSITION ------------
 
