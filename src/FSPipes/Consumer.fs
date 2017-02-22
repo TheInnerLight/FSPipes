@@ -21,28 +21,21 @@ open Pipes.Operators
 
 module Consumer =
     /// A consumer that writes out data to the processes' stdout stream
-    let stdOutLine : Consumer<_, unit> = Pipes.for' Pipes.identity (Pipes.liftIO << Console.writeLine)
-
-    /// Creates a consumer from a supplied binary channel
-    let fromBinaryChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << BinaryChannel.writeBytes chan)
-
-    /// Creates a consumer from a supplied text channel
-    let fromTextChannel chan : Consumer<_,_>  = Pipes.for' Pipes.identity (Pipes.liftIO << TextChannel.putStrLn chan)
+    let stdOutLine : Consumer<string, unit> = Pipes.for' Pipes.identity (Pipes.liftAsync << async.Return << System.Console.WriteLine)
 
     /// Creates a consumer that writes data out to a supplied file
     let writeToFile file : Consumer<_,_> =
         pipe {
-            let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultWrite file
-            do! fromBinaryChannel channel
-            do! Pipes.liftIO <| BinaryChannel.close channel
+            use stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
+            return! Pipes.for' Pipes.identity (Pipes.liftAsync << stream.AsyncWrite)
         }
 
     /// Creates a consumer that writes data out to a supplied file line by line
     let writeLinesToFile file : Consumer<_,_> =
         pipe {
-            let! channel = Pipes.liftIO <| File.openTextChannel File.Open.defaultWrite file
-            do! fromTextChannel channel
-            do! Pipes.liftIO <| TextChannel.close channel
+            use stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
+            use streamWriter = new System.IO.StreamWriter(stream)
+            return! Pipes.for' Pipes.identity (fun (str : string) -> Pipes.liftAsync << Async.AwaitTask <| (streamWriter.WriteLineAsync(str).ContinueWith<unit>(fun _ -> ())))
         }
         
          

@@ -11,10 +11,8 @@
    limitations under the License.
 *)
 
-namespace NovelFS.NovelIO.UnitTests
+namespace NovelFS.FSPipes.UnitTests
 
-open NovelFS.NovelIO
-open NovelFS.NovelIO.BinaryPickler
 open NovelFS.FSPipes
 open Pipes.Operators
 open FsCheck
@@ -23,8 +21,8 @@ open FsCheck.Xunit
 module PipeTestHelper =
     /// Effectfully transforms a pipe into a list
     let toList pipe =
-        Pipes.fold (fun acc v ->acc @ [v]) [] pipe
-        |> IO.run
+        Producer.fold (fun acc v ->acc @ [v]) [] pipe
+        |> Async.RunSynchronously
 
 type ``Pipes Unit Tests``() =
     [<Property>]

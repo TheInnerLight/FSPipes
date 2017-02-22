@@ -16,25 +16,55 @@
 
 namespace NovelFS.FSPipes
 
-open NovelFS.NovelIO
 open Pipes.Operators
 
 module Producer =
+
+    /// Advances the producer getting a choice of either the final value or a value and the producer to generate the subsequent value
+    let next (p : Producer<'bout, 'v>) : Async<Choice<'v, 'bout * Producer<'bout,'v>>> = 
+        let rec nextRec p = 
+            match p with
+            |Request (_) -> invalidOp "Impossible"
+            |Respond (a, fu) -> async.Return (Choice2Of2 (a, fu ()))
+            |AsyncM m  -> async.Bind(m, nextRec)
+            |Value r -> async.Return (Choice1Of2 r)
+        nextRec p
+
+    /// Folds over a producer using a supplied accumulation function, initial accumulator value and producer.
+    /// (Note: this function is not an idiomatic use of Pipes but it is included to facilitate the development of unit tests.)
+    let fold f acc (p0 : Producer<_, _>) =
+        let rec foldRec p x =
+            match p with
+            |Request (_)  -> invalidOp "Impossible"
+            |Respond (a, fu) -> foldRec (fu ()) (f x a)
+            |AsyncM m  -> async.Bind(m, (fun p' -> foldRec p' x))
+            |Value _ -> async.Return x
+        foldRec p0 acc
+
     /// Create a producer from a supplied file which supplies the bytes that make up the file as a series of byte arrays
     let fromFile path : Producer<_,_> =
         pipe  {
-            let! channel = Pipes.liftIO <| File.openBinaryChannel File.Open.defaultRead (File.Path.fromValid path)
-            let eof = (Pipes.liftIO <| BinaryChannel.isEOF channel) |> Pipeline.map (not)
-            let read = (Pipes.liftIO <| BinaryChannel.read channel 16384) >>= (Pipes.yield')
-            return! Pipeline.iterWhileM eof read
+            use stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, 4096, true)
+            let read = stream.AsyncRead 4096
+            return! Pipeline.iterateUntil (Array.isEmpty) (Pipes.liftAsync read)
             }
         
     /// Create a producer which delivers the data from a supplied sequence
-    let fromSeq seq = Pipes.each seq
+    let fromSeq seq : Producer<_,_> = Pipes.each seq
+
+    /// Create a producer from an initial state and generation function
+    let rec unfold generator state : Producer<_,_> =
+        pipe {
+            match generator state with
+            |Choice1Of2 v -> return v
+            |Choice2Of2 (acc, state') ->
+                do! Pipes.yield' acc
+                return! unfold generator state'
+            }
 
     /// A producer which delivers data from the processes' stdin stream
     let stdInLine : Producer<_, _> =
         Pipeline.forever (
-            let pl' = Pipes.liftIO (Console.readLine)
+            let pl' = Pipes.liftAsync << async.Return <| System.Console.ReadLine()
             pl' >>= Pipes.yield')
         

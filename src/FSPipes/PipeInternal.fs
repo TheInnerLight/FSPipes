@@ -16,14 +16,12 @@
 
 namespace NovelFS.FSPipes
 
-open NovelFS.NovelIO
-
 type X = private |Closed
 
 type Pipeline<'UO, 'UI, 'DI, 'DO, 'V> =
     |Request of 'UO * ('UI -> Pipeline<'UO, 'UI, 'DI, 'DO, 'V>)
     |Respond of 'DO * ('DI -> Pipeline<'UO, 'UI, 'DI, 'DO, 'V>)
-    |IOM of IO<Pipeline<'UO, 'UI, 'DI, 'DO, 'V>>
+    |AsyncM of Async<Pipeline<'UO, 'UI, 'DI, 'DO, 'V>>
     |Value of 'V
 
 type Producer<'DO, 'V> = Pipeline<X, unit, unit, 'DO, 'V>
@@ -33,6 +31,16 @@ type Consumer<'UI, 'V> = Pipeline<unit, 'UI, unit, X, 'V>
 type Pipe<'UI, 'DO, 'V> = Pipeline<unit, 'UI, unit, 'DO, 'V>
 
 type Effect<'V> = Pipeline<X, unit, unit, X, 'V>
+
+[<AutoOpen>]
+module Prelude =
+    /// Helper function that takes two arguments and throws away the second, returning the first
+    let inline const' x _ = x
+    /// Curried function for prepending to list, equivalent to x :: ys
+    let inline listCons x ys = x :: ys
+
+module Async =
+    let map f x = async.Bind(x, async.Return << f)
 
 module Pipeline =
     // ------------ CATEGORY IDENTITIES ------------
@@ -55,7 +63,7 @@ module Pipeline =
             match p with
             |Request (a', fa) -> Request (a', bindRec << fa)
             |Respond (b,  fb') -> Respond (b, bindRec << fb')
-            |IOM io -> IOM <| IO.map bindRec io
+            |AsyncM io -> AsyncM <| Async.map bindRec io
             |Value r -> f r
         bindRec p0
 
@@ -64,7 +72,7 @@ module Pipeline =
             match p with
             |Request (x', fx)  -> Request (x', bindRec << fx)
             |Respond (b, fb') -> bind (fb b) (bindRec << fb')
-            |IOM io -> IOM <| IO.map bindRec io
+            |AsyncM io -> AsyncM <| Async.map bindRec io
             |Value a   -> Value a
         bindRec p0
 
@@ -73,7 +81,7 @@ module Pipeline =
             match p with
             |Request (b', fb)  -> bind (fb' b') (bindRec << fb)
             |Respond (x, fx') -> Respond (x, bindRec << fx')
-            |IOM io -> IOM <| IO.map bindRec io
+            |AsyncM io -> AsyncM <| Async.map bindRec io
             |Value r -> Value r
         bindRec p0
 
@@ -81,14 +89,14 @@ module Pipeline =
         match p with
         |Request (a', fa)  -> Request (a', (fun a -> bindPush (fa a) fb))
         |Respond (b , fb') ->  bindPull (fb b) fb'
-        |IOM io -> IOM <| IO.map (fun p' -> bindPush p' fb) io
+        |AsyncM io -> AsyncM <| Async.map (fun p' -> bindPush p' fb) io
         |Value r   -> Value r
 
     and bindPull p fb' =
         match p with
         |Request (b', fb)  -> bindPush (fb' b') fb
         |Respond (c,  fc') -> Respond (c, (fun c' -> bindPull (fc' c') fb' ))
-        |IOM io -> IOM <| IO.map (fun p' -> bindPull p' fb') io
+        |AsyncM io -> AsyncM <| Async.map (fun p' -> bindPull p' fb') io
         |Value r   -> Value r
 
     // Builder
@@ -97,6 +105,17 @@ module Pipeline =
         member this.Return x = return' x
         member this.ReturnFrom x : Pipeline<_,_,_,_,_> = x
         member this.Bind (x, f) = bind x f
+        member this.TryFinally(body, compensation) =
+            try 
+                this.ReturnFrom(body())
+            finally 
+                compensation() 
+        member this.Using(disposable:#System.IDisposable, body) =
+            let body' = fun () -> body disposable
+            this.TryFinally(body', fun () -> 
+                if isNull disposable then () else disposable.Dispose())
+
+
 
     let pipe = PipeBuilder()
 
@@ -121,16 +140,16 @@ module Pipeline =
 
     /// Execute an action repeatedly as long as the given boolean IO action returns true
     let iterWhileM (pAct : Pipeline<_,_,_,_,bool>) (act : Pipeline<_,_,_,_,'V>) =
-        let rec whileMRec() =
+        let rec whileMRec v =
             pipe { // check the predicate action
                 let! p = pAct 
                 match p with
                 |true -> // unwrap the current action value then recurse
-                    let! _ = act
-                    return! whileMRec()
-                |false -> return () // finished
+                    let! v = act
+                    return! whileMRec v
+                |false -> return v  // finished
             }
-        whileMRec ()
+        whileMRec (Unchecked.defaultof<'V>)
 
     /// Yields the result of applying f until p holds.
     let rec iterateUntilM p f v =

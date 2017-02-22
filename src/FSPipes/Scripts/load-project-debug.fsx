@@ -2,6 +2,7 @@
 #I __SOURCE_DIRECTORY__
 #load "load-references-debug.fsx"
 #load "../PipeInternal.fs"
+      "../Encoding.fs"
       "../Pipes.fs"
       "../Producer.fs"
       "../Consumer.fs"

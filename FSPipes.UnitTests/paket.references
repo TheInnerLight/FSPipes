@@ -1,0 +1,9 @@
+FSharp.Core
+group Test
+	FsCheck
+	FsCheck.Xunit
+	xunit
+	xunit.abstractions
+	xunit.assert
+	xunit.core
+	xunit.extensibility.execution

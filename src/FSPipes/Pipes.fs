@@ -16,19 +16,9 @@
 
 namespace NovelFS.FSPipes
 
-open NovelFS.NovelIO
-
-type GroupedData<'T, 'Id> = 
-    | Data of 'T 
-    | Marker of 'Id
-
-type BufferRequest<'a> =
-    |RequestBack of 'a
-    |PushBack of 'a
-
 module Pipes =
-    /// Lift a value from the IO monad into the pipeline monad
-    let liftIO x = IOM <| IO.bind x (IO.return' << Value)
+    /// Lift a value from the Async monad into the pipeline monad
+    let liftAsync x = AsyncM <| async.Bind(x, (async.Return << Value))
 
     /// Await a value from a pipeline
     let await<'ain, 'bin, 'bout> : Pipeline<unit, 'ain, 'bin, 'bout, 'ain> = Pipeline.request() 
@@ -43,23 +33,13 @@ module Pipes =
     let each sequ  =
         Seq.fold (fun acc p -> Pipeline.bind acc (fun _ -> yield' p)) (Pipeline.return'()) sequ
 
-    /// Advances the producer getting a choice of either the final value or a value and the producer to generate the subsequent value
-    let next (p : Producer<'bout, 'v>) : IO<Choice<'v, 'bout * Producer<'bout,'v>>> = 
-        let rec nextRec p = 
-            match p with
-            |Request (_) -> invalidOp "Impossible"
-            |Respond (a, fu) -> IO.return' (Choice2Of2 (a, fu ()))
-            |IOM m  -> IO.bind m (nextRec)
-            |Value r -> IO.return' (Choice1Of2 r)
-        nextRec p
-
     /// Runs an effect to generate a result within the IO monad
     let rec runEffect (effect : Effect<_>) =
         match effect with
         |Request (_)  -> invalidOp "Impossible"
         |Respond (_) -> invalidOp "Impossible"
-        |IOM io -> IO.bind io runEffect
-        |Value r   -> IO.return' r
+        |AsyncM io -> async.Bind(io, runEffect)
+        |Value r   -> async.Return r
 
     /// A set of convenience operators on pipelines
     module Operators =
@@ -89,17 +69,6 @@ module Pipes =
 
     /// The identity pipe, it receives input from upstream and forwards it on downstream unchanged
     let identity<'a,'V> : Pipeline<unit, 'a, unit, 'a, 'V>  = Pipeline.pull()
-
-    /// Folds over a producer using a supplied accumulation function, initial accumulator value and producer.
-    /// (Note: this function is not an idiomatic use of Pipes but it is included to permit the development of unit tests.)
-    let fold f acc (p0 : Producer<_, _>) =
-        let rec foldRec p x =
-            match p with
-            |Request (_)  -> invalidOp "Impossible"
-            |Respond (a, fu) -> foldRec (fu ()) (f x a)
-            |IOM m  -> IO.bind m (fun p' -> foldRec p' x)
-            |Value _ -> IO.return' x
-        foldRec p0 acc
 
     /// Creates a pipe that applies a function to every value flowing downstream
     let map f = for' identity (yield' << f)
@@ -156,37 +125,6 @@ module Pipes =
         let getBytes (str: string) = encoder.GetBytes(str)
         for' identity (yield' << getBytes)
 
-    let encode2 enc arr =
-        let encoder = (Encoding.createDotNetEncoding enc)
-        let decoder = (Encoding.createDotNetEncoding enc).GetDecoder()
-        let rec encode2Rec (leftover : byte[]) =
-            pipe {
-                let! (bytes : byte[]) = Pipeline.request leftover
-                let chars = Array.zeroCreate<char> (Array.length bytes)
-                let bytesUsed, charsUsed, _ = decoder.Convert(bytes, 0, Array.length bytes, chars, 0, Array.length chars, true)
-                match bytesUsed = Array.length bytes with
-                |true -> 
-                    let! (resp : string) = Pipeline.respond <| System.String(Array.take charsUsed chars)
-                    return! encode2Rec (encoder.GetBytes(resp))
-                |false -> 
-                    let! (resp : string) = Pipeline.respond <| System.String(Array.take charsUsed chars)
-                    return! encode2Rec (Array.append (encoder.GetBytes(resp)) (Array.skip bytesUsed bytes))
-            }
-        encode2Rec arr
-
-    let byteBuffer<'V> : Pipeline<_,_,_,_,'V> =
-        let rec byteBufferRec leftover =
-            pipe {
-                let! (bytes : byte[]) = await
-                let! (leftoverReq : BufferRequest<byte[]>) =
-                    match leftover with
-                    |RequestBack leftover' -> Pipeline.respond (Array.append bytes leftover')
-                    |PushBack leftover' -> 
-                        Pipeline.respond ([||]) >>= (fun _ -> Pipeline.return' <| RequestBack leftover')
-                return! byteBufferRec  leftoverReq
-            }
-        byteBufferRec (RequestBack [||])
-
     /// Creates a pipe that applies a sequence producing function to every value flowing downstream, each value
     /// in the resulting sequence is yielded individually.
     let collect f = for' identity (each << f)
@@ -228,51 +166,3 @@ module Pipes =
                 
              }
         skipWhileRec()
-
-    module Array =
-        let until sought buff =
-            let rec untilRec buff =
-                pipe {
-                    let! buff = Pipeline.request (RequestBack buff)
-                    let maybeIndex =
-                        buff
-                        |> Array.windowed (Array.length sought)
-                        |> Array.tryFindIndex (fun arr -> arr = sought)
-                    match maybeIndex with
-                    |Some ind -> 
-                        let before, after = Array.splitAt ind buff
-                        do! yield' before
-                        let! _ = Pipeline.request (PushBack after)
-                        return ()
-                    |None ->
-                        return! untilRec buff
-                }
-            untilRec buff
-
-    module String =
-        module private Internal =
-            type Buffer = {Buff : string; Len : int}
-
-            let push (str : string) buffer =
-                let str' = buffer.Buff + str
-                let start' = max (str'.Length - buffer.Len) 0
-                let end' = min (str'.Length) (buffer.Len + start')
-                {Buff = str'.Substring(start', end'-start'); Len = buffer.Len} 
-
-        let groupAfter (sought : string) =
-            let length = (sought.Length)
-            let rec untilRec (buff : Internal.Buffer) =
-                pipe {
-                    let! (str : string) = await
-                    let combined = buff.Buff + str
-                    match combined.Contains(sought) with
-                    |false -> 
-                        do! yield' (Data str)
-                        return! untilRec (Internal.push str buff)
-                    |true -> 
-                        do! yield' << Data <| combined.Substring(buff.Buff.Length, combined.IndexOf(sought) + length)
-                        do! yield' <| Marker()
-                        do! yield' << Data <| combined.Substring(combined.IndexOf(sought) + length + 1)
-                        return! for' identity (yield' << Data)
-                    }
-            untilRec {Buff = System.String.Empty; Len = sought.Length}

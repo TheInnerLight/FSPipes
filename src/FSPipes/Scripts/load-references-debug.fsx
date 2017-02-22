@@ -3,4 +3,5 @@
 #r "System.Core.dll"
 #r "System.dll"
 #r "System.Numerics.dll"
-#r "../../../packages/NovelIO/lib/net45/NovelIO.dll"
+#r "System.ComponentModel.Composition.dll"
+#r "../../../packages/System.ValueTuple/lib/netstandard1.0/System.ValueTuple.dll"
