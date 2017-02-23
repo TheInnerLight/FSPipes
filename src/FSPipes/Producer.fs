@@ -18,6 +18,16 @@ namespace NovelFS.FSPipes
 
 open Pipes.Operators
 
+module StreamHelper =
+    let asyncRead count (stream : System.IO.Stream) =
+        let buffer = Array.zeroCreate count
+        async {
+            let! n = stream.AsyncRead(buffer,0,count)
+            return Array.take n buffer
+            }
+        
+
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Producer =
 
     /// Advances the producer getting a choice of either the final value or a value and the producer to generate the subsequent value
@@ -43,11 +53,20 @@ module Producer =
 
     /// Create a producer from a supplied file which supplies the bytes that make up the file as a series of byte arrays
     let fromFile path : Producer<_,_> =
-        pipe  {
-            use stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, 4096, true)
-            let read = stream.AsyncRead 4096
-            return! Pipeline.iterateUntil (Array.isEmpty) (Pipes.liftAsync read)
+        let stream = new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read, 4096, true)
+        let read = StreamHelper.asyncRead 4096 stream
+        let rec fromFileRec() =
+            pipe {
+                let! x = Pipes.liftAsync read
+                match x with
+                |[||] -> 
+                    stream.Close()
+                    return ()
+                |_ ->
+                    do! Pipes.yield' x
+                    return! fromFileRec()
             }
+        fromFileRec()
         
     /// Create a producer which delivers the data from a supplied sequence
     let fromSeq seq : Producer<_,_> = Pipes.each seq

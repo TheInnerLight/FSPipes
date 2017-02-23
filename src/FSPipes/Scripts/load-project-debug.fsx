@@ -6,3 +6,15 @@
       "../Pipes.fs"
       "../Producer.fs"
       "../Consumer.fs"
+
+open NovelFS.FSPipes
+open NovelFS.FSPipes.Pipes.Operators
+
+let effect = Producer.fromFile """dd_vs2015.3_decompression_log.txt""" >-> Pipes.decode Encoding.utf8WithoutBom >-> Consumer.stdOutLine
+
+//let pipeline = Producer.fromSeq ["A"; "B"] >-> Pipes.words  >-> Consumer.stdOutLine
+
+//let pipeline = Producer.stdInLine >-> Pipes.words >-> Consumer.stdOutLine
+effect
+|> Pipes.runEffect
+|> Async.RunSynchronously;;

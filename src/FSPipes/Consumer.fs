@@ -14,27 +14,28 @@
    limitations under the License.
 *)
 
-namespace NovelFS.NovelIO
+namespace NovelFS.FSPipes
 
 open NovelFS.FSPipes
 open Pipes.Operators
 
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Consumer =
     /// A consumer that writes out data to the processes' stdout stream
-    let stdOutLine : Consumer<string, unit> = Pipes.for' Pipes.identity (Pipes.liftAsync << async.Return << System.Console.WriteLine)
+    let stdOutLine<'V> : Consumer<string, 'V> = Pipes.for' Pipes.identity (Pipes.liftAsync << async.Return << System.Console.WriteLine)
 
     /// Creates a consumer that writes data out to a supplied file
     let writeToFile file : Consumer<_,_> =
         pipe {
-            use stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
+            let stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
             return! Pipes.for' Pipes.identity (Pipes.liftAsync << stream.AsyncWrite)
         }
 
     /// Creates a consumer that writes data out to a supplied file line by line
     let writeLinesToFile file : Consumer<_,_> =
         pipe {
-            use stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
-            use streamWriter = new System.IO.StreamWriter(stream)
+            let stream = new System.IO.FileStream(file, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None, 4096, true)
+            let streamWriter = new System.IO.StreamWriter(stream)
             return! Pipes.for' Pipes.identity (fun (str : string) -> Pipes.liftAsync << Async.AwaitTask <| (streamWriter.WriteLineAsync(str).ContinueWith<unit>(fun _ -> ())))
         }
         
